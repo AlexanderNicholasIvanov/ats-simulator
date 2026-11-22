@@ -84,6 +84,21 @@ Each simulated ATS is a plain data object (`AtsProfile` in `src/types.ts`) descr
 The engine applies the profile's parser rules to the extracted document (for example, dropping header text or reading
 two columns line by line), parses the result, and scores it against the job description.
 
+- A `false` parser flag drops (headers/footers, tables, text boxes) or scrambles (columns) those lines and adds a
+  warning; a file type outside `preferredFormats` adds an info note.
+- A heading-like line not in `headings` is reported as an unknown heading; a date outside `dateFormats` is reported
+  as a `date-format` warning.
+- Seven fields count towards completeness: name, email, phone, location, a dated job, education, skills.
+- For `scoring: 'score'` profiles:
+
+  ```
+  score = round(100 × (keywords × matchRatio
+                     + completeness × fieldsFound / 7
+                     + formatting × (1 − min(1, 0.25 × errors + 0.1 × warnings))))
+  ```
+
+  `search-match` profiles report `round(100 × matchRatio)` instead. Without a job description nothing is scored.
+
 ### Adding an ATS profile
 
 1. Create `src/ats/profiles/<id>.ts` exporting an `AtsProfile` (the `id` must be kebab-case and unique).
