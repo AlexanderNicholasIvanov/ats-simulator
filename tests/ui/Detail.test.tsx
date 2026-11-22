@@ -44,6 +44,17 @@ describe('detail view (criterion 17)', () => {
     expect(screen.getByRole('button', { name: 'View details for Workday' })).toHaveFocus();
   });
 
+  it('opens with Space on the focused button', async () => {
+    const { user } = await renderSimulated();
+    const button = screen.getByRole('button', { name: 'View details for Oracle Taleo' });
+    button.focus();
+    await user.keyboard(' ');
+    expect(screen.queryAllByRole('article')).toHaveLength(0);
+    expect(screen.getByRole('heading', { name: /Oracle Taleo: full details/ })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'View details for Oracle Taleo' })).toHaveFocus();
+  });
+
   it('"Back to all results" returns to the grid and restores focus', async () => {
     const { user } = await renderSimulated();
     await user.click(screen.getByRole('button', { name: 'View details for Lever' }));

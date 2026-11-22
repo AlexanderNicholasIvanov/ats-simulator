@@ -1,5 +1,5 @@
 import type { AtsProfile, SimulationResult } from '../types.ts';
-import { outcomeLabel } from './format.ts';
+import { RESULTS_HEADING_ID, outcomeLabel } from './format.ts';
 import { ResultCard } from './ResultCard.tsx';
 
 export interface ResultsProps {
@@ -14,9 +14,11 @@ export interface ResultsProps {
 
 export function Results({ results, ranked, profiles, onOpen, onDownload }: ResultsProps) {
   return (
-    <section className="results" aria-labelledby="results-heading">
+    <section className="results" aria-labelledby={RESULTS_HEADING_ID}>
       <div className="results-head">
-        <h2 id="results-heading">Results</h2>
+        <h2 id={RESULTS_HEADING_ID} tabIndex={-1}>
+          Results
+        </h2>
         <button type="button" className="secondary" onClick={onDownload}>
           Download report
         </button>

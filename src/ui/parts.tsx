@@ -40,8 +40,8 @@ export function KeywordList({ label, keywords, kind, limit }: KeywordListProps) 
         <p className="muted">None</p>
       ) : (
         <ul className={`chips chips-${kind}`}>
-          {shown.map((keyword) => (
-            <li key={keyword} className="chip">
+          {shown.map((keyword, index) => (
+            <li key={`${index}-${keyword}`} className="chip">
               {keyword}
             </li>
           ))}

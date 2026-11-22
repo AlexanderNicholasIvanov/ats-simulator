@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 
 export interface InputPanelProps {
   file: File | null;
@@ -28,6 +28,20 @@ export function InputPanel(props: InputPanelProps) {
   const [dragging, setDragging] = useState(false);
   const canSimulate = !busy && (file !== null || resumeText.trim().length > 0);
 
+  // A file dropped just outside the drop zone would otherwise make the browser open it and
+  // lose the page state. Text drags (e.g. into the textareas) are left alone.
+  useEffect(() => {
+    function blockFileDrop(event: globalThis.DragEvent) {
+      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    }
+    window.addEventListener('dragover', blockFileDrop);
+    window.addEventListener('drop', blockFileDrop);
+    return () => {
+      window.removeEventListener('dragover', blockFileDrop);
+      window.removeEventListener('drop', blockFileDrop);
+    };
+  }, []);
+
   function clearFile() {
     if (fileInput.current) fileInput.current.value = '';
     onFileChange(null);
@@ -36,6 +50,7 @@ export function InputPanel(props: InputPanelProps) {
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragging(false);
+    if (busy) return;
     const dropped = event.dataTransfer.files[0];
     if (dropped) {
       if (fileInput.current) fileInput.current.value = '';
@@ -72,13 +87,14 @@ export function InputPanel(props: InputPanelProps) {
             ref={fileInput}
             type="file"
             accept=".pdf,.docx,.txt"
+            disabled={busy}
             onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
           />
           <p className="hint">Drop a file here, or choose one with the button.</p>
           {file && (
             <p className="selected-file">
               Selected: <strong>{file.name}</strong>{' '}
-              <button type="button" className="link-button" onClick={clearFile}>
+              <button type="button" className="link-button" onClick={clearFile} disabled={busy}>
                 Clear file
               </button>
             </p>
@@ -90,6 +106,7 @@ export function InputPanel(props: InputPanelProps) {
           id="resume-text"
           rows={10}
           value={resumeText}
+          disabled={busy}
           onChange={(event) => onResumeTextChange(event.target.value)}
         />
         {file && resumeText.trim() && (
@@ -101,6 +118,7 @@ export function InputPanel(props: InputPanelProps) {
           id="job-description"
           rows={8}
           value={jd}
+          disabled={busy}
           onChange={(event) => onJdChange(event.target.value)}
         />
 

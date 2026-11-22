@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { PROFILES, buildReport, rankResults, simulateAll } from './ats/index.ts';
 import { extractFile, extractPlainText } from './extract/index.ts';
@@ -8,7 +8,7 @@ import { DetailView } from './ui/DetailView.tsx';
 import { Header } from './ui/Header.tsx';
 import { InputPanel } from './ui/InputPanel.tsx';
 import { Results } from './ui/Results.tsx';
-import { detailsButtonId } from './ui/format.ts';
+import { RESULTS_HEADING_ID, detailsButtonId } from './ui/format.ts';
 import { downloadReport } from './ui/report.ts';
 import './styles.css';
 
@@ -31,8 +31,35 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const alertRef = useRef<HTMLDivElement>(null);
+
+  // The focused Simulate button is disabled while busy, so move focus somewhere useful afterwards:
+  // the Results heading on success, the alert on failure.
+  useEffect(() => {
+    if (simulation) document.getElementById(RESULTS_HEADING_ID)?.focus();
+  }, [simulation]);
+
+  useEffect(() => {
+    if (error) alertRef.current?.focus();
+  }, [error]);
+
+  const handleFileChange = useCallback((next: File | null) => {
+    setError(null);
+    setFile(next);
+  }, []);
+
+  const handleResumeTextChange = useCallback((text: string) => {
+    setError(null);
+    setResumeText(text);
+  }, []);
+
+  const handleJdChange = useCallback((text: string) => {
+    setError(null);
+    setJd(text);
+  }, []);
 
   const handleLoadSample = useCallback(() => {
+    setError(null);
     setFile(null);
     setResumeText(SAMPLE_RESUME_TEXT);
     setJd(SAMPLE_JD);
@@ -79,16 +106,24 @@ export default function App() {
           resumeText={resumeText}
           jd={jd}
           busy={busy}
-          onFileChange={setFile}
-          onResumeTextChange={setResumeText}
-          onJdChange={setJd}
+          onFileChange={handleFileChange}
+          onResumeTextChange={handleResumeTextChange}
+          onJdChange={handleJdChange}
           onLoadSample={handleLoadSample}
           onSimulate={() => void handleSimulate()}
         />
 
-        <div role="alert" className={error ? 'error' : 'error empty'}>
+        <div role="alert" ref={alertRef} tabIndex={-1} className={error ? 'error' : 'error empty'}>
           {error}
         </div>
+
+        <p role="status" className="visually-hidden">
+          {busy
+            ? 'Simulating...'
+            : simulation
+              ? `${simulation.results.length} results ready`
+              : ''}
+        </p>
 
         {simulation &&
           (openResult ? (

@@ -44,6 +44,27 @@ describe('App input view (criterion 1)', () => {
   });
 });
 
+function fileDropEvent(type: 'dragover' | 'drop'): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: { types: ['Files'], files: [] } });
+  return event;
+}
+
+describe('drops outside the drop zone', () => {
+  it('are blocked at window level so the tab does not navigate, and unblocked on unmount', () => {
+    const { unmount } = render(<App />);
+    for (const type of ['dragover', 'drop'] as const) {
+      const event = fileDropEvent(type);
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+    unmount();
+    const after = fileDropEvent('drop');
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
+});
+
 describe('rejected files (criterion 4)', () => {
   it('shows the ExtractError message in an alert and renders no cards', async () => {
     vi.mocked(extractFile).mockRejectedValueOnce(
@@ -62,6 +83,26 @@ describe('rejected files (criterion 4)', () => {
     expect(extractFile).toHaveBeenCalledWith(png);
     expect(simulateAll).not.toHaveBeenCalled();
     expect(screen.queryAllByRole('article')).toHaveLength(0);
+    expect(screen.getByRole('alert')).toHaveFocus();
+  });
+
+  it('clears a stale error when a new file is chosen or the text is edited', async () => {
+    vi.mocked(extractFile).mockRejectedValue(new ExtractError('corrupt', 'Could not read file.'));
+    const user = userEvent.setup();
+    render(<App />);
+    const input = screen.getByLabelText(/Resume file/);
+    await user.upload(input, new File(['x'], 'a.pdf', { type: 'application/pdf' }));
+    await user.click(screen.getByRole('button', { name: 'Simulate' }));
+    expect(await screen.findByText('Could not read file.')).toBeInTheDocument();
+
+    await user.upload(input, new File(['y'], 'b.pdf', { type: 'application/pdf' }));
+    expect(screen.getByRole('alert')).toBeEmptyDOMElement();
+
+    await user.click(screen.getByRole('button', { name: 'Simulate' }));
+    expect(await screen.findByText('Could not read file.')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Job description'), 'R');
+    expect(screen.getByRole('alert')).toBeEmptyDOMElement();
+    vi.mocked(extractFile).mockReset();
   });
 
   it('shows a busy state while extracting', async () => {
@@ -84,6 +125,13 @@ describe('rejected files (criterion 4)', () => {
       'aria-busy',
       'true',
     );
+    // inputs are locked so the results cannot belong to a different file than the one shown
+    expect(screen.getByLabelText(/Resume file/)).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Clear file' })).toBeDisabled();
+    expect(screen.getByLabelText('Or paste resume text')).toBeDisabled();
+    expect(screen.getByLabelText('Job description')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Load sample' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Simulating...');
     resolve(fakeDoc);
     expect(await screen.findAllByRole('article')).toHaveLength(8);
   });
@@ -114,6 +162,12 @@ describe('results (criterion 5, UI part)', () => {
     });
     expect(items[0]).toHaveTextContent('Jobvite 55/100');
     expect(within(ranking).getByText('search match 66%')).toBeInTheDocument();
+  });
+
+  it('moves focus to the Results heading and announces the results', async () => {
+    await renderSimulated();
+    expect(screen.getByRole('heading', { level: 2, name: 'Results' })).toHaveFocus();
+    expect(screen.getByRole('status')).toHaveTextContent('8 results ready');
   });
 
   it('Load sample clears a chosen file', async () => {

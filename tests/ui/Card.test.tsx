@@ -58,6 +58,15 @@ describe('ResultCard', () => {
     expect(chips[8]).toHaveTextContent('+2 more');
   });
 
+  it('renders repeated keywords without duplicate React keys', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const result = { ...makeResult(workday, 0), matched: ['react', 'react'] };
+    render(<ResultCard result={result} profile={workday} onOpen={() => {}} />);
+    expect(screen.getAllByText('react')).toHaveLength(2);
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
   it('labels each warning with its severity word, not colour alone', () => {
     render(<ResultCard result={makeResult(workday, 0)} profile={workday} onOpen={() => {}} />);
     expect(screen.getByText('Error:')).toBeInTheDocument();

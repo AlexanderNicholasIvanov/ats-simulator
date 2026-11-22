@@ -26,6 +26,8 @@ export function outcomeLabel(result: SimulationResult): string {
   return 'not scored';
 }
 
+export const RESULTS_HEADING_ID = 'results-heading';
+
 /** DOM id helpers so cards, headings and buttons can reference each other. */
 export function cardTitleId(profileId: string): string {
   return `card-title-${profileId}`;
