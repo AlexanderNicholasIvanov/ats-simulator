@@ -78,3 +78,37 @@ describe('match modes (criterion 8)', () => {
     );
   });
 });
+
+describe('finding 6: ordinary words, short language terms, go-to, docker', () => {
+  it('keeps only real skills from ordinary prose', () => {
+    expect(extractKeywords('We use Go and C. Let us go to the moon. Requires R and Excel.')).toEqual([
+      'Go',
+      'C',
+      'R',
+      'Excel',
+    ]);
+  });
+
+  it('drops common verbs and one-off ordinary words', () => {
+    const kws = extractKeywords('Join us! You will work with people, use tools and love it. Looking for Python.');
+    expect(kws).toEqual(['Python']);
+  });
+
+  it('ignores short terms in the wrong casing or outside a list context', () => {
+    expect(extractKeywords('Please go ahead and apply.')).toEqual([]);
+    expect(extractKeywords('Plan C is our backup.')).toEqual([]);
+  });
+
+  it("exact mode does not match 'go' inside 'go-to' or short terms in other casing", () => {
+    expect(matchKeywords(['Go'], 'My go-to stack is Rust.', 'exact').matched).toEqual([]);
+    expect(matchKeywords(['Go'], "Let's go ship it", 'synonym').matched).toEqual([]);
+    expect(matchKeywords(['Go'], 'Services in Go and Rust', 'exact').matched).toEqual(['Go']);
+    expect(matchKeywords(['C'], 'Wrote firmware in C, C++', 'exact').matched).toEqual(['C']);
+  });
+
+  it("the stemmer keeps 'docker' apart from 'docking'", () => {
+    expect(stem('docker')).not.toBe(stem('docking'));
+    expect(matchKeywords(['Docker'], 'Built a docking station app', 'stemmed').matched).toEqual([]);
+    expect(matchKeywords(['Docker'], 'Containerised services with Docker', 'stemmed').matched).toEqual(['Docker']);
+  });
+});

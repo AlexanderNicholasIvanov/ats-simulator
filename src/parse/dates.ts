@@ -114,6 +114,9 @@ export function classifyDate(token: string): ClassifiedDate | undefined {
     };
   }
   if ((m = t.match(/^(\d{4})-(\d{2})$/))) {
+    // '2018-19' is a year range (YYYY-YY), not month 19
+    const yearRange = shortYearEnd(m[1], m[2]);
+    if (!monthOk(m[2]) && yearRange) return { formats: ['YYYY'], normalized: m[1] };
     const mm = monthOk(m[2]);
     return {
       formats: ['YYYY-MM'],
@@ -148,7 +151,29 @@ export function findDateRanges(line: string): DateRangeHit[] {
   for (const m of line.matchAll(RANGE_RE())) {
     hits.push({ raw: m[0], index: m.index ?? 0, startRaw: m[1], endRaw: m[2] });
   }
-  return hits;
+  // YYYY-YY year ranges: '2018-19' (YY > 12), or any 'YYYY – YY' / 'YYYY to YY' with a spaced or
+  // dash separator. The end is expanded to four digits ('19' -> '2019') and read as 'YYYY'.
+  for (const m of line.matchAll(SHORT_YEAR_RANGE_RE())) {
+    const index = m.index ?? 0;
+    if (hits.some((h) => index < h.index + h.raw.length && h.index < index + m[0].length)) continue;
+    const plainHyphen = m[2] === '-';
+    if (plainHyphen && monthOk(m[3])) continue; // '2021-03' is YYYY-MM
+    const end = shortYearEnd(m[1], m[3]);
+    if (!end) continue;
+    hits.push({ raw: m[0], index, startRaw: m[1], endRaw: end });
+  }
+  return hits.sort((a, b) => a.index - b.index);
+}
+
+const SHORT_YEAR_RANGE_RE = () => /(?<![\w/])(\d{4})(\s*[-–—]\s*|\s+to\s+)(\d{2})(?![\w/])/gi;
+
+/** '2018' + '19' -> '2019'; undefined unless the end year is after the start year and plausible. */
+function shortYearEnd(start: string, yy: string): string | undefined {
+  const s = Number(start);
+  if (!plausibleYear(start)) return undefined;
+  let e = Math.floor(s / 100) * 100 + Number(yy);
+  if (e <= s) e += 100;
+  return e > s && e - s <= 20 && plausibleYear(String(e)) ? String(e) : undefined;
 }
 
 /** Every date-looking token in a line (years 1900-2100, month/season + year, numeric forms). */

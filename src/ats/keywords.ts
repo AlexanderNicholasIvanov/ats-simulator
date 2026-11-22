@@ -10,7 +10,8 @@ const STOPWORDS = new Set(
     'having he her here hers him his how i if in into is it its itself just me more most must my no nor not of off ' +
     'on once only or other our ours out over own per same she should so some such than that the their theirs them ' +
     'then there these they this those through to too under until up us very via was we were what when where which ' +
-    'while who whom why will with within without would you your yours e.g i.e'
+    'while who whom why will with within without would you your yours e.g i.e let lets get gets got go goes going ' +
+    'come comes take takes put puts keep keeps really always often may might shall yet still even ever'
   ).split(/\s+/),
 );
 
@@ -27,7 +28,11 @@ const GENERIC = new Set(
     'responsible role salary senior skill skills strong success successful team teams together understanding ' +
     'using well work working world year years design own ensure across make makes multiple various ' +
     'within willing etc look seeking hire hiring part full-time full time based us engineer engineers ' +
-    'platform features initiatives development cross-team'
+    'platform features initiatives development cross-team use uses used requires require requiring ' +
+    'need needs needed want wants wanted works worked join joining joins seek seeks bring brings offer offers ' +
+    'get thing things way ways lot lots kind something someone anyone everyone people person time times ' +
+    'today tomorrow week weeks month months day days place help helps helping grow growing growth love ' +
+    'enjoy exciting excited mission vision values impact big small large great awesome amazing'
   ).split(/\s+/),
 );
 
@@ -116,10 +121,38 @@ const SYNONYM_GROUPS: string[][] = [
   ['microsoft excel', 'excel'],
 ];
 
-/** Short tokens that are still meaningful skills. */
-const SHORT_TERMS = new Set(['js', 'ts', 'ai', 'ml', 'ui', 'ux', 'qa', 'go', 'r', 'c', 'bi', 'ci', 'k8s']);
+/**
+ * 1-2 letter skills, accepted only in exactly this casing ('Go', not 'go') and only in a list-like
+ * context ("Go and C", "R, Python", "with Go").
+ */
+const SHORT_TERMS = new Set(['C', 'R', 'Go', 'GO', 'JS', 'TS', 'AI', 'ML', 'UI', 'UX', 'QA', 'BI']);
+const LIST_CONTEXT_WORDS = new Set(['and', 'or', 'with', 'in', 'using', 'use', 'uses', 'like', 'including', 'plus']);
 
-const WORD_CHARS = 'a-z0-9+#';
+/**
+ * Tool and technology names: always kept as keywords, and never stemmed ('docker' must not equal 'docking').
+ */
+const TECH_WORDS = new Set(
+  (
+    'docker kubernetes jenkins terraform ansible kafka spark hadoop redis mongodb mysql postgresql postgres ' +
+    'graphql react angular vue svelte typescript javascript python java kotlin swift rust ruby rails php ' +
+    'scala golang perl matlab excel tableau looker snowflake airflow pandas numpy pytorch tensorflow jest ' +
+    'cypress playwright selenium webpack vite express django flask laravel linux unix bash git github gitlab ' +
+    'jira confluence figma sketch sql nosql html css sass aws azure gcp lambda serverless kanban saas ' +
+    'b2b seo crm erp salesforce sap wcag'
+  ).split(/\s+/),
+);
+
+/** Skill words that are always kept as keywords even if they occur once (these are stemmed normally). */
+const SKILL_WORDS = new Set(
+  (
+    'accessibility testing mentoring leadership communication analytics security debugging devops agile ' +
+    'scrum frontend backend fullstack api apis rest microservices stakeholders deployments pipelines ' +
+    'automation monitoring observability performance documentation'
+  ).split(/\s+/),
+);
+
+/** Characters that continue a word: 'go' does not match inside 'go-to' or 'golang'. */
+const WORD_CHARS = 'a-z0-9+#\\-';
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
@@ -138,7 +171,7 @@ function termRegex(term: string, flags = 'i'): RegExp {
 /** Simple suffix stripper: 'managed' ~ 'management' ~ 'manage' -> 'manag'. */
 export function stem(word: string): string {
   let w = word.toLowerCase();
-  if (!/^[a-z]+$/.test(w)) return w;
+  if (!/^[a-z]+$/.test(w) || TECH_WORDS.has(w)) return w;
   if (w.length <= 3) return w;
   const rules: [string, string][] = [
     ['ibility', 'ibl'],
@@ -201,20 +234,38 @@ function stemTokens(text: string): string[] {
 function keepToken(t: string): boolean {
   if (STOPWORDS.has(t) || GENERIC.has(t)) return false;
   if (/^[\d.,+%-]+$/.test(t)) return false;
-  if (t.length < 3 && !SHORT_TERMS.has(t)) return false;
+  if (t.length < 3) return false;
   return /[a-z]/.test(t);
+}
+
+/** True when the token starts a sentence, line or bullet (so its capital letter means nothing). */
+function sentenceInitial(text: string, index: number): boolean {
+  let i = index - 1;
+  while (i >= 0 && (text[i] === ' ' || text[i] === '\t')) i--;
+  return i < 0 || /[.!?:\n\r•*\-–—(]/.test(text[i]);
+}
+
+/** A list-like context: next to ',', '/', ';', '(' or a word such as 'and' / 'with'. */
+function listContext(text: string, index: number, length: number): boolean {
+  const before = text.slice(Math.max(0, index - 20), index);
+  const after = text.slice(index + length, index + length + 20);
+  if (/[,/;(]\s*$/.test(before) || /^\s*[,/;)]/.test(after)) return true;
+  const prevWord = before.match(/([A-Za-z]+)\s+$/)?.[1]?.toLowerCase();
+  const nextWord = after.match(/^\s+([A-Za-z]+)/)?.[1]?.toLowerCase();
+  return (!!prevWord && LIST_CONTEXT_WORDS.has(prevWord)) || (!!nextWord && LIST_CONTEXT_WORDS.has(nextWord));
 }
 
 /** Up to ~30 JD keywords, most frequent first (ties: first appearance), in the JD's own spelling. */
 export function extractKeywords(jd: string): string[] {
-  const counts = new Map<string, { count: number; first: number; spelling: string }>();
-  const add = (key: string, spelling: string, index: number) => {
+  const counts = new Map<string, { count: number; first: number; spelling: string; strong: boolean }>();
+  const add = (key: string, spelling: string, index: number, strong = true) => {
     const cur = counts.get(key);
     if (cur) {
       cur.count++;
+      cur.strong ||= strong;
       // prefer a lower-case spelling over a sentence-initial capital ('Testing' -> 'testing')
       if (spelling === key && cur.spelling !== key && cur.spelling.slice(1) === key.slice(1)) cur.spelling = spelling;
-    } else counts.set(key, { count: 1, first: index, spelling });
+    } else counts.set(key, { count: 1, first: index, spelling, strong });
   };
 
   // 1. dictionary terms, longest first, blanked out so their words are not counted again
@@ -228,12 +279,24 @@ export function extractKeywords(jd: string): string[] {
     });
   }
 
-  // 2. remaining single tokens
+  // 2. remaining single tokens. A plain lower-case word must repeat to count; tech words, terms with
+  // digits/symbols/inner capitals and capitalised words mid-sentence count at once.
   for (const m of rest.matchAll(/[A-Za-z0-9+#][A-Za-z0-9+#./-]*/g)) {
     const spelling = m[0].replace(/[./-]+$/, '');
     const key = spelling.toLowerCase();
+    const index = m.index ?? 0;
+    if (key.length <= 2) {
+      if (SHORT_TERMS.has(spelling) && listContext(rest, index, spelling.length)) add(key, spelling, index);
+      continue;
+    }
     if (!keepToken(key)) continue;
-    add(key, spelling, m.index ?? 0);
+    const strong =
+      TECH_WORDS.has(key) ||
+      SKILL_WORDS.has(key) ||
+      /[^a-z]/.test(key) ||
+      /[A-Z]/.test(spelling.slice(1)) ||
+      (/^[A-Z]/.test(spelling) && !sentenceInitial(rest, index));
+    add(key, spelling, index, strong);
   }
 
   // Merge single words that are plural/inflected forms of the same stem (keep first spelling).
@@ -244,7 +307,10 @@ export function extractKeywords(jd: string): string[] {
     const owner = byStem.get(s);
     if (owner && owner !== key) {
       const o = counts.get(owner);
-      if (o) o.count += v.count;
+      if (o) {
+        o.count += v.count;
+        o.strong ||= v.strong;
+      }
       counts.delete(key);
     } else {
       byStem.set(s, key);
@@ -252,6 +318,7 @@ export function extractKeywords(jd: string): string[] {
   }
 
   return [...counts.values()]
+    .filter((v) => v.strong || v.count >= 2)
     .sort((a, b) => b.count - a.count || a.first - b.first)
     .slice(0, MAX_KEYWORDS)
     .map((v) => v.spelling);
@@ -266,8 +333,13 @@ function synonymsOf(term: string): string[] {
   return [...out];
 }
 
-function exactMatch(term: string, text: string): boolean {
-  return termRegex(term).test(text);
+function exactMatch(term: string, text: string, caseSensitive = false): boolean {
+  return termRegex(term, caseSensitive ? '' : 'i').test(text);
+}
+
+/** 1-2 letter terms ('C', 'R', 'Go') only match in the JD's casing, and never by stem. */
+function isShort(term: string): boolean {
+  return term.trim().length <= 2;
 }
 
 function stemMatch(term: string, stems: string[], stemSet: Set<string>): boolean {
@@ -300,8 +372,10 @@ export function matchKeywords(keywords: string[], resumeText: string, mode: Keyw
   const missing: string[] = [];
   for (const term of keywords) {
     const candidates = mode === 'synonym' ? [term, ...synonymsOf(term)] : [term];
-    const ok = candidates.some(
-      (c) => exactMatch(c, resumeText) || (mode !== 'exact' && stemMatch(c, stems, stemSet)),
+    const ok = candidates.some((c, i) =>
+      isShort(c)
+        ? exactMatch(c, resumeText, i === 0)
+        : exactMatch(c, resumeText) || (mode !== 'exact' && stemMatch(c, stems, stemSet)),
     );
     (ok ? matched : missing).push(term);
   }

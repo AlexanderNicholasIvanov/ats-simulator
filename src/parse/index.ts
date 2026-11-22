@@ -57,6 +57,9 @@ const HEADING_VOCAB = new Set([
   'training',
   'volunteer',
   'volunteering',
+  'hobbies',
+  'journey',
+  'worked',
 ]);
 const SMALL_WORDS = new Set(['of', 'and', '&', 'the', 'in', 'for', 'to', 'a', 'an', 'with', '/']);
 
@@ -66,8 +69,43 @@ const PHONE_RES = [
   /(?<![\d])\+\d{1,3}(?:[\s.-]?\(?\d{1,4}\)?){2,5}(?!\d)/,
 ];
 const LINK_RE = /\b(?:https?:\/\/\S+|www\.\S+|(?:[a-z]{2,3}\.)?(?:linkedin|github)\.com\/\S+)/gi;
-const LOCATION_RE =
-  /^([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3}),\s*([A-Z]{2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)$/;
+/** A capitalised (any script) word, allowing accents, dots, apostrophes and hyphens: 'Zoë', "O'Neil", 'J.' */
+const CAP_WORD = "\\p{Lu}[\\p{L}\\p{M}.'’-]*";
+const NAME_RE = new RegExp(`^${CAP_WORD}(?:\\s+${CAP_WORD}){1,3}$`, 'u');
+const CITY_SRC = `${CAP_WORD}(?:\\s+(?:${CAP_WORD}|de|do|da|del|la|le|sur|am|upon|on)){0,3}`;
+/** 'Austin, TX', 'New York, NY 10001' */
+const US_LOCATION_RE = new RegExp(`^(${CITY_SRC}),\\s*([A-Z]{2})(?:\\s+\\d{5}(?:-\\d{4})?)?$`, 'u');
+/** 'Berlin, Germany' - the country must be in COUNTRIES */
+const COUNTRY_LOCATION_RE = new RegExp(`^(${CITY_SRC}),\\s*(\\p{Lu}[\\p{L}\\p{M} .'’-]*)$`, 'u');
+const US_STATES = new Set(
+  (
+    'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH ' +
+    'OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC PR ' +
+    // Canadian provinces use the same 'City, XX' form
+    'AB BC MB NB NL NS NT NU ON PE QC SK YT'
+  ).split(' '),
+);
+const COUNTRIES = new Set(
+  (
+    'usa|united states|united states of america|us|canada|mexico|brazil|argentina|chile|colombia|peru|' +
+    'united kingdom|uk|england|scotland|wales|ireland|france|germany|spain|portugal|italy|netherlands|' +
+    'belgium|luxembourg|switzerland|austria|denmark|sweden|norway|finland|iceland|poland|czechia|' +
+    'czech republic|slovakia|hungary|romania|bulgaria|greece|turkey|türkiye|ukraine|estonia|latvia|' +
+    'lithuania|croatia|serbia|slovenia|israel|egypt|morocco|nigeria|kenya|ghana|south africa|' +
+    'united arab emirates|uae|saudi arabia|qatar|india|pakistan|bangladesh|sri lanka|nepal|china|' +
+    'hong kong|taiwan|japan|south korea|korea|singapore|malaysia|indonesia|thailand|vietnam|philippines|' +
+    'australia|new zealand'
+  ).split('|'),
+);
+/** A 'City, X' left part containing one of these is a job line, not a place. */
+const JOB_TITLE_WORDS = new Set(
+  (
+    'engineer engineering manager management developer development designer design analyst consultant ' +
+    'director lead architect specialist scientist intern assistant associate officer administrator ' +
+    'coordinator technician head president founder programmer owner executive representative ' +
+    'supervisor advisor recruiter senior junior principal staff platform team'
+  ).split(' '),
+);
 const INSTITUTION_RE = /\b(University|College|Institute|School|Academy|Polytechnic)\b/i;
 const DEGREE_RE =
   /(?<![A-Za-z])(B\.S\.?|B\.A\.?|BSc|BEng|BS|BA|M\.S\.?|M\.A\.?|MSc|MEng|MS|MBA|Ph\.?D\.?|Ed\.?D\.?|Bachelor(?:'s)?|Master(?:'s)?|Associate(?:'s)?|Doctor(?:ate)?|Diploma)(?![A-Za-z])/;
@@ -92,16 +130,51 @@ function isBullet(line: string): boolean {
   return BULLET_RE.test(line);
 }
 
-/** Short Title Case / ALL CAPS line with a heading word, no digits, no separators. */
+/** Short (<= 4 words) Title Case / ALL CAPS line without digits, '@', bullets or separators. */
 function isHeadingShaped(line: string): boolean {
   const t = line.trim().replace(/[:：]\s*$/, '');
-  if (!t || /\d|@/.test(t) || /[,|•.;!?()]/.test(t) || /\s[-–—]\s/.test(t)) return false;
+  if (!t || isBullet(t) || /\d|@/.test(t) || /[,|•.;!?()]/.test(t) || /\s[-–—]\s/.test(t)) return false;
   const words = t.split(/\s+/);
-  if (words.length > 4) return false;
-  const allCaps = t === t.toUpperCase() && /[A-Z]/.test(t);
-  const titleCase = words.every((w) => SMALL_WORDS.has(w.toLowerCase()) || /^[A-Z]/.test(w));
-  if (!allCaps && !titleCase) return false;
-  return words.some((w) => HEADING_VOCAB.has(w.toLowerCase()));
+  if (words.length > 4 || !words.some((w) => /\p{L}{2,}/u.test(w))) return false;
+  const allCaps = t === t.toUpperCase() && /\p{Lu}/u.test(t);
+  const titleCase = words.every((w) => SMALL_WORDS.has(w.toLowerCase()) || /^\p{Lu}/u.test(w));
+  return allCaps || titleCase;
+}
+
+function hasHeadingVocab(line: string): boolean {
+  return line
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .some((w) => HEADING_VOCAB.has(w));
+}
+
+function hasJobTitleWord(text: string): boolean {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .some((w) => JOB_TITLE_WORDS.has(w));
+}
+
+function hasContactData(line: string): boolean {
+  return EMAIL_RE.test(line) || PHONE_RES.some((r) => r.test(line)) || new RegExp(LINK_RE.source, 'i').test(line);
+}
+
+function isNameLine(t: string): boolean {
+  return !/\d|@/.test(t) && NAME_RE.test(t) && !hasHeadingVocab(t) && !hasJobTitleWord(t);
+}
+
+/** 'Austin, TX' (preferred) or 'City, Country' for a country in COUNTRIES; never a job line. */
+function matchLocation(segment: string, kind: 'us' | 'country'): string | undefined {
+  const seg = segment.trim();
+  if (!seg || EMAIL_RE.test(seg)) return undefined;
+  if (kind === 'us') {
+    const m = seg.match(US_LOCATION_RE);
+    if (m && US_STATES.has(m[2]) && !hasJobTitleWord(m[1])) return `${m[1]}, ${m[2]}`;
+    return undefined;
+  }
+  const m = seg.match(COUNTRY_LOCATION_RE);
+  if (m && COUNTRIES.has(m[2].trim().toLowerCase()) && !hasJobTitleWord(m[1])) return seg;
+  return undefined;
 }
 
 function stripBullet(line: string): string {
@@ -152,23 +225,14 @@ function parseContact(topLines: string[], text: string): Contact {
   }
   contact.links = [...links];
 
-  for (const raw of topLines) {
-    const t = raw.trim();
-    if (!t) continue;
-    if (
-      !/\d|@/.test(t) &&
-      /^[A-Z][A-Za-z.'’-]*(?:\s+[A-Z][A-Za-z.'’-]*){1,3}$/.test(t) &&
-      !isHeadingShaped(t)
-    ) {
-      contact.name = t;
-      break;
-    }
-  }
-  for (const raw of topLines) {
-    for (const seg of raw.split(/\s*[|•·]\s*|\s{3,}/)) {
-      const m = seg.trim().match(LOCATION_RE);
-      if (m && !EMAIL_RE.test(seg)) {
-        contact.location = seg.trim();
+  const name = topLines.find((t) => isNameLine(t.trim()));
+  if (name) contact.name = name.trim();
+  const segments = topLines.flatMap((raw) => raw.split(/\s*[|•·]\s*|\s{3,}/));
+  for (const kind of ['us', 'country'] as const) {
+    for (const seg of segments) {
+      const loc = matchLocation(seg, kind);
+      if (loc) {
+        contact.location = loc;
         break;
       }
     }
@@ -300,6 +364,32 @@ export function parseResume(text: string, opts: ParseOptions): ParsedResume {
   let current: SectionKind | 'none' = 'none';
   const topLines: string[] = [];
   let seenHeading = false;
+  let nameSeen = false;
+  const nextNonEmpty = (from: number): string | undefined => {
+    for (let j = from; j < lines.length; j++) if (lines[j].trim()) return lines[j].trim();
+    return undefined;
+  };
+  const indexOfNextNonEmpty = (from: number): number => {
+    for (let j = from; j < lines.length; j++) if (lines[j].trim()) return j;
+    return lines.length;
+  };
+  const LIST_SECTIONS: (SectionKind | 'none')[] = ['skills', 'projects', 'certifications', 'education'];
+  const isUnknownHeading = (t: string, i: number): boolean => {
+    if (!isHeadingShaped(t)) return false;
+    if (!seenHeading && !nameSeen && isNameLine(t)) return false; // the name line
+    if (hasContactData(t) || matchLocation(t, 'us') || matchLocation(t, 'country')) return false;
+    if (hasJobTitleWord(t) || INSTITUTION_RE.test(t) || DEGREE_RE.test(t)) return false;
+    if (LIST_SECTIONS.includes(current) && !hasHeadingVocab(t) && !/[:：]\s*$/.test(t)) return false;
+    const n1 = indexOfNextNonEmpty(i + 1);
+    const next = lines[n1]?.trim();
+    if (!next) return false; // must be followed by content
+    // a job: 'Title' + dates, or 'Title' / 'Employer' / dates
+    if (findDateRanges(next).length > 0) return false;
+    const next2 = nextNonEmpty(n1 + 1);
+    const nextIsPlain = !TITLE_SEPARATORS.some((sep) => next.includes(sep)) && wordCount(next) <= 6;
+    if (nextIsPlain && next2 && findDateRanges(next2).length > 0) return false;
+    return true;
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -313,14 +403,13 @@ export function parseResume(text: string, opts: ParseOptions): ParsedResume {
       seenHeading = true;
       continue;
     }
-    // a title line directly followed by dates is a job, not a heading
-    const nextHasRange = !!lines[i + 1] && findDateRanges(lines[i + 1]).length > 0;
-    if (isHeadingShaped(t) && findDateTokens(t).length === 0 && !nextHasRange) {
+    if (findDateTokens(t).length === 0 && isUnknownHeading(t, i)) {
       sections.push({ heading: t.replace(/[:：]\s*$/, ''), recognized: false });
       current = 'other';
       seenHeading = true;
       continue;
     }
+    if (!seenHeading && !nameSeen && isNameLine(t)) nameSeen = true;
     if (!seenHeading && topLines.length < 10) topLines.push(t);
     bySection[current].push(line);
   }
