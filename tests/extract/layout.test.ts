@@ -37,6 +37,51 @@ describe('pdf layout helpers', () => {
     expect(layoutPage(items, 612, 792, 1).twoColumn).toBe(false);
   });
 
+  it('keeps right-aligned job dates on a page without full-width lines single-column', () => {
+    const items: PositionedText[] = [];
+    let y = 80;
+    for (let job = 0; job < 6; job++) {
+      items.push(item(`Job title ${job} - Employer`, 50, y, 150), item('Jan 2019 - Dec 2020', 470, y, 90));
+      items.push(item(`- short bullet ${job}a`, 50, y + 14, 120), item(`- short bullet ${job}b`, 50, y + 28, 120));
+      y += 50;
+    }
+    expect(findGutter(items, 612)).toBeNull();
+    const { lines, twoColumn } = layoutPage(items, 612, 792, 1);
+    expect(twoColumn).toBe(false);
+    expect(lines).toHaveLength(18);
+    expect(lines[0].text).toBe('Job title 0 - Employer Jan 2019 - Dec 2020');
+    expect(lines.every((l) => l.column === 0)).toBe(true);
+  });
+
+  it('tolerates a full-width banner above two real columns and reads it first', () => {
+    const items: PositionedText[] = [item('CASEY MORGAN - BACKEND SOFTWARE ENGINEER', 50, 70, 520)];
+    for (let i = 0; i < 20; i++) {
+      items.push(item(`left ${i}`, 40, 100 + i * 15, 100), item(`right column text ${i}`, 260, 100 + i * 15, 280));
+    }
+    const { lines, twoColumn } = layoutPage(items, 612, 792, 1);
+    expect(twoColumn).toBe(true);
+    expect(lines[0]).toMatchObject({ text: 'CASEY MORGAN - BACKEND SOFTWARE ENGINEER', column: 0 });
+    expect(lines.slice(1, 21).every((l) => l.column === 0 && l.text.startsWith('left'))).toBe(true);
+    expect(lines.slice(21).every((l) => l.column === 1 && l.text.startsWith('right'))).toBe(true);
+    expect(lines).toHaveLength(41);
+  });
+
+  it('reads a spanning line between two column bands in place', () => {
+    const items: PositionedText[] = [];
+    for (let i = 0; i < 8; i++) {
+      items.push(item(`top left ${i}`, 40, 100 + i * 15, 100), item(`top right text ${i}`, 260, 100 + i * 15, 280));
+    }
+    items.push(item('A full width divider sentence across the whole page', 40, 230, 520));
+    for (let i = 0; i < 8; i++) {
+      items.push(item(`bottom left ${i}`, 40, 250 + i * 15, 100), item(`bottom right ${i}`, 260, 250 + i * 15, 280));
+    }
+    const { lines, twoColumn } = layoutPage(items, 612, 792, 1);
+    expect(twoColumn).toBe(true);
+    const texts = lines.map((l) => l.text);
+    expect(texts.indexOf('top right text 7')).toBeLessThan(texts.indexOf('A full width divider sentence across the whole page'));
+    expect(texts.indexOf('A full width divider sentence across the whole page')).toBeLessThan(texts.indexOf('bottom left 0'));
+  });
+
   it('finds a gutter between two side-by-side columns', () => {
     const items: PositionedText[] = [];
     for (let i = 0; i < 10; i++) {

@@ -24,7 +24,10 @@ function loadPdfJs(): Promise<PdfJs> {
       pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
     }
     return pdfjs;
-  })();
+  })().catch((err: unknown) => {
+    pdfjsPromise = null; // let the next call retry instead of caching the failure
+    throw err;
+  });
   return pdfjsPromise;
 }
 
@@ -44,8 +47,9 @@ function isTextItem(item: unknown): item is RawTextItem {
 export async function extractPdf(data: Uint8Array, fileName: string): Promise<ExtractedDocument> {
   const pdfjs = await loadPdfJs();
   const task = pdfjs.getDocument({ data });
-  const doc = await task.promise;
   try {
+    // Inside the try so a corrupt or password-protected PDF still destroys the loading task.
+    const doc = await task.promise;
     const lines: Line[] = [];
     let twoColumn = false;
     for (let p = 1; p <= doc.numPages; p++) {
