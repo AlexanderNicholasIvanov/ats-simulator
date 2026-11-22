@@ -14,6 +14,12 @@ function countOrNotFound(count: number): string {
   return count > 0 ? String(count) : NOT_FOUND;
 }
 
+/** The first link, plus how many more there are; "Not found" when there are none. */
+function linksSummary(links: string[]): string {
+  if (links.length === 0) return NOT_FOUND;
+  return links.length === 1 ? links[0] : `${links[0]} (+${links.length - 1} more)`;
+}
+
 export function ResultCard({ result, profile, onOpen }: ResultCardProps) {
   const { parsed } = result;
   const titleId = cardTitleId(result.profileId);
@@ -38,6 +44,8 @@ export function ResultCard({ result, profile, onOpen }: ResultCardProps) {
           <dd>{orNotFound(parsed.contact.phone)}</dd>
           <dt>Location</dt>
           <dd>{orNotFound(parsed.contact.location)}</dd>
+          <dt>Links</dt>
+          <dd>{linksSummary(parsed.contact.links)}</dd>
           <dt>Jobs</dt>
           <dd>{countOrNotFound(parsed.experience.length)}</dd>
           <dt>Education</dt>
@@ -75,6 +83,11 @@ export function ResultCard({ result, profile, onOpen }: ResultCardProps) {
         <h4>Warnings</h4>
         <WarningList warnings={result.warnings} />
       </section>
+
+      <details className="raw-text">
+        <summary>Raw text as this ATS sees it</summary>
+        <pre tabIndex={0}>{result.rawText}</pre>
+      </details>
 
       {profile?.note && <p className="note">{profile.note}</p>}
 

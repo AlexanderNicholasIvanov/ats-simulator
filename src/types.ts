@@ -93,7 +93,7 @@ export interface ParsedResume {
   education: Education[];
   skills: string[];
   sections: SectionHit[];
-  /** date strings found in experience that this parser's date formats could not read */
+  /** date strings found in any section (not the top contact block) that this parser's date formats could not read */
   unparsedDates: string[];
 }
 
@@ -149,7 +149,7 @@ export interface SimulationResult {
   parsed: ParsedResume;
   fieldsFound: number;
   fieldsTotal: number;
-  /** true when a non-empty job description was given */
+  /** true when a job description with at least one recognisable keyword was given */
   jdProvided: boolean;
   /** 0-100 when profile.scoring==='score' and jdProvided, else null */
   score: number | null;

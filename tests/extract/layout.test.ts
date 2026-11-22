@@ -96,6 +96,49 @@ describe('pdf layout helpers', () => {
     expect(lines.slice(0, 10).every((l) => l.column === 0 && l.text.startsWith('left'))).toBe(true);
     expect(lines.slice(10).every((l) => l.column === 1 && l.text.startsWith('right'))).toBe(true);
   });
+
+  it('keeps a name near the top margin in the body when body lines follow without a gap', () => {
+    // 0.5in top margin, 20pt name: baseline ~54pt on a 792pt page (inside the top 7% band).
+    const items: PositionedText[] = [item('Casey Morgan', 50, 54, 160)];
+    items.push(item('casey.morgan@example.com | (555) 010-7788', 50, 70, 260));
+    for (let i = 0; i < 20; i++) items.push(item(`Body line ${i}`, 50, 86 + i * 14, 200));
+    const { lines } = layoutPage(items, 612, 792, 1);
+    expect(lines[0]).toMatchObject({ text: 'Casey Morgan', region: 'body' });
+    expect(lines[1]).toMatchObject({ region: 'body' });
+    expect(lines.every((l) => l.region === 'body')).toBe(true);
+  });
+
+  it('treats a top-band line separated from the body by a clear gap as a header, and mirrors it for footers', () => {
+    const items: PositionedText[] = [item('casey.morgan@example.com', 50, 50, 160)];
+    for (let i = 0; i < 20; i++) items.push(item(`Body line ${i}`, 50, 90 + i * 14, 200));
+    items.push(item('Page 1 of 1', 50, 750, 60)); // inside the bottom 7% band, 6% from the bottom edge
+    const { lines } = layoutPage(items, 612, 792, 1);
+    expect(lines[0]).toMatchObject({ text: 'casey.morgan@example.com', region: 'header' });
+    expect(lines[lines.length - 1]).toMatchObject({ text: 'Page 1 of 1', region: 'footer' });
+
+    // The same footer line directly under the last body line is body text.
+    const tight = [...items.slice(0, -1), item('Last body line', 50, 730, 60), item('Page 1 of 1', 50, 744, 60)];
+    expect(layoutPage(tight, 612, 792, 1).lines.every((l) => l.region !== 'footer')).toBe(true);
+  });
+
+  it('always treats lines above 4% of the page as header, gap or not', () => {
+    const items: PositionedText[] = [item('Casey Morgan', 50, 20, 160)];
+    for (let i = 0; i < 20; i++) items.push(item(`Body line ${i}`, 50, 34 + i * 14, 200));
+    expect(layoutPage(items, 612, 792, 1).lines[0]).toMatchObject({ text: 'Casey Morgan', region: 'header' });
+  });
+
+  it('ignores an item far off the page when looking for a gutter (and returns quickly)', () => {
+    const items: PositionedText[] = [];
+    for (let i = 0; i < 10; i++) {
+      items.push(item(`left ${i}`, 40, 100 + i * 15, 100), item(`right column text ${i}`, 260, 100 + i * 15, 280));
+    }
+    const expected = findGutter(items, 612);
+    const started = performance.now();
+    const withOffPage = findGutter([...items, item('off page', 1e6, 150, 40)], 612);
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(withOffPage).toBe(expected);
+    expect(findGutter([...items, item('negative', -1e6, 150, 40)], 612)).toBe(expected);
+  });
 });
 
 describe('docx xml paragraphs', () => {

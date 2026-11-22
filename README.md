@@ -97,7 +97,12 @@ two columns line by line), parses the result, and scores it against the job desc
                      + formatting × (1 − min(1, 0.25 × errors + 0.1 × warnings))))
   ```
 
-  `search-match` profiles report `round(100 × matchRatio)` instead. Without a job description nothing is scored.
+  `search-match` profiles report `round(100 × matchRatio)` instead. Without a job description (or with one that has
+  no recognisable keywords, which adds a `no-keywords` note) nothing is scored.
+- The ranking row orders every ATS by one common outcome, computed the same way whatever the profile's own scoring:
+  `0.5 × matchRatio + 0.3 × fieldsFound / 7 + 0.2 × (1 − min(1, 0.25 × errors + 0.1 × warnings))` (without a job
+  description the match term is dropped and the other two are renormalised), with ties broken by more fields found,
+  then fewer errors, then the default profile order.
 
 ### Adding an ATS profile
 

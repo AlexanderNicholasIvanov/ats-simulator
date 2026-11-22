@@ -9,6 +9,13 @@ export interface DetailViewProps {
   onClose: () => void;
 }
 
+/** True for form fields and contentEditable elements, where Escape belongs to the field, not the view. */
+function isEditable(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || target.closest('[contenteditable]:not([contenteditable="false"])')) return true;
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+}
+
 export function DetailView({ result, profile, onClose }: DetailViewProps) {
   const heading = useRef<HTMLHeadingElement>(null);
   const { parsed } = result;
@@ -19,7 +26,7 @@ export function DetailView({ result, profile, onClose }: DetailViewProps) {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.isComposing && !isEditable(event.target)) {
         event.preventDefault();
         onClose();
       }

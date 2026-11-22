@@ -1,5 +1,7 @@
-import { screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { DetailView } from '../../src/ui/DetailView.tsx';
+import { fakeProfiles, makeResult } from './fixtures.ts';
 import { renderSimulated } from './helpers.tsx';
 
 vi.mock('../../src/ats/index.ts', async () => (await import('./mocks.ts')).atsModule);
@@ -62,5 +64,56 @@ describe('detail view (criterion 17)', () => {
     await user.click(screen.getByRole('button', { name: 'Back to all results' }));
     expect(screen.getAllByRole('article')).toHaveLength(8);
     expect(screen.getByRole('button', { name: 'View details for Lever' })).toHaveFocus();
+  });
+});
+
+describe('detail view Escape handling', () => {
+  function renderWithFields() {
+    const onClose = vi.fn();
+    render(
+      <>
+        <label>
+          Notes
+          <textarea />
+        </label>
+        <label>
+          Search
+          <input type="text" />
+        </label>
+        <label>
+          Pick
+          <select>
+            <option>One</option>
+          </select>
+        </label>
+        <div contentEditable suppressContentEditableWarning data-testid="editable">
+          <span data-testid="editable-child">editable</span>
+        </div>
+        <DetailView result={makeResult(fakeProfiles[0], 0)} profile={fakeProfiles[0]} onClose={onClose} />
+      </>,
+    );
+    return onClose;
+  }
+
+  it('ignores Escape typed in a textarea, input, select or contentEditable element', () => {
+    const onClose = renderWithFields();
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Notes' }), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Search' }), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Pick' }), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByTestId('editable'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByTestId('editable-child'), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('ignores Escape while an IME composition is active', () => {
+    const onClose = renderWithFields();
+    fireEvent.keyDown(document.body, { key: 'Escape', isComposing: true });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('still closes on Escape elsewhere', () => {
+    const onClose = renderWithFields();
+    fireEvent.keyDown(screen.getByRole('heading', { name: /full details/ }), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

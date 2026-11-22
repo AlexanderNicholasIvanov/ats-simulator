@@ -8,20 +8,11 @@ import type {
   SimulationResult,
   Warning,
 } from '../types.ts';
-import { parseResume } from '../parse/index.ts';
+import { hasContactData, parseResume } from '../parse/index.ts';
 import { extractKeywords, matchKeywords } from './keywords.ts';
 import { PROFILES } from './profiles/index.ts';
 
 export const FIELDS_TOTAL = 7;
-
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
-const PHONE_RE = /(?:\+?\d[\d\s().-]{8,}\d)/;
-
-function hasContact(text: string): boolean {
-  if (EMAIL_RE.test(text)) return true;
-  const m = text.match(PHONE_RE);
-  return !!m && m[0].replace(/\D/g, '').length >= 10;
-}
 
 interface ParserView {
   rawText: string;
@@ -38,11 +29,11 @@ export function parserView(doc: ExtractedDocument, profile: AtsProfile): ParserV
     const dropped = lines.filter((l) => l.region !== 'body');
     if (dropped.length > 0) {
       lines = lines.filter((l) => l.region === 'body');
-      if (dropped.some((l) => hasContact(l.text))) {
+      if (dropped.some((l) => hasContactData(l.text))) {
         warnings.push({
           severity: 'error',
           code: 'header-contact',
-          message: `${profile.name} does not read page headers or footers, so the contact details placed there are lost. Move your email and phone into the main body.`,
+          message: `${profile.name} does not read page headers or footers, so the contact details placed there are lost. Move your email, phone and links into the main body.`,
         });
       } else {
         warnings.push({
@@ -109,13 +100,27 @@ function emptyParsed(): ParsedResume {
   return { contact: { links: [] }, experience: [], education: [], skills: [], sections: [], unparsedDates: [] };
 }
 
+const NO_KEYWORDS: Warning = {
+  severity: 'info',
+  code: 'no-keywords',
+  message: 'The job description has no recognisable keywords to score against.',
+};
+
+/**
+ * Simulates one profile. `jdKeywords` is extractKeywords(jd), precomputed by simulateAll so it runs once for
+ * all profiles; when omitted it is computed here. A JD with no recognisable keywords is treated as no JD for
+ * scoring (jdProvided false, score / searchMatch null) and adds a 'no-keywords' info warning.
+ */
 export function simulate(
   doc: ExtractedDocument,
   jd: string | undefined,
   profile: AtsProfile,
+  jdKeywords?: string[],
 ): SimulationResult {
-  const jdProvided = !!jd?.trim();
-  const keywords = jdProvided ? extractKeywords(jd ?? '') : [];
+  const jdText = !!jd?.trim();
+  const keywords = jdText ? (jdKeywords ?? extractKeywords(jd ?? '')) : [];
+  const jdProvided = keywords.length > 0;
+  const jdWarnings: Warning[] = jdText && !jdProvided ? [NO_KEYWORDS] : [];
   const view = parserView(doc, profile);
   const base = {
     profileId: profile.id,
@@ -126,6 +131,8 @@ export function simulate(
 
   if (doc.layout.imageOnly || !view.rawText.trim()) {
     const isSearch = profile.scoring === 'search-match';
+    // When the document had text, keep the parser-view warnings that explain why this ATS sees none.
+    const docHadText = !doc.layout.imageOnly && doc.lines.some((l) => l.text.trim() !== '');
     return {
       ...base,
       rawText: '',
@@ -141,12 +148,14 @@ export function simulate(
           code: 'no-text',
           message: 'No text extracted - this ATS would see an empty resume.',
         },
+        ...(docHadText ? view.warnings : []),
+        ...jdWarnings,
       ],
     };
   }
 
   const parsed = parseResume(view.rawText, { headings: profile.headings, dateFormats: profile.dateFormats });
-  const warnings = [...view.warnings];
+  const warnings = [...view.warnings, ...jdWarnings];
   for (const s of parsed.sections) {
     if (!s.recognized) {
       warnings.push({
@@ -200,19 +209,39 @@ export function simulate(
 }
 
 export function simulateAll(doc: ExtractedDocument, jd?: string): SimulationResult[] {
-  return PROFILES.map((p) => simulate(doc, jd, p));
+  const keywords = jd?.trim() ? extractKeywords(jd) : [];
+  return PROFILES.map((p) => simulate(doc, jd, p, keywords));
 }
 
 function errorCount(r: SimulationResult): number {
   return r.warnings.filter((w) => w.severity === 'error').length;
 }
 
-/** Best outcome first: (score ?? searchMatch ?? -1) desc, then fieldsFound desc, then fewer errors. Stable. */
+/**
+ * One outcome in [0, 1], computed the same way for every result whatever its profile's own scoring:
+ * 0.5 * keyword match ratio + 0.3 * field completeness + 0.2 * (1 - formatting penalty) with a JD, and
+ * the last two terms renormalised to sum to 1 without one. Penalty = min(1, 0.25 * errors + 0.1 * warnings).
+ */
+export function outcome(r: SimulationResult): number {
+  const errors = errorCount(r);
+  const warns = r.warnings.filter((w) => w.severity === 'warning').length;
+  const formatting = 1 - Math.min(1, 0.25 * errors + 0.1 * warns);
+  const completeness = r.fieldsTotal > 0 ? r.fieldsFound / r.fieldsTotal : 0;
+  if (!r.jdProvided) return (0.3 * completeness + 0.2 * formatting) / 0.5;
+  const total = r.matched.length + r.missing.length;
+  const matchRatio = total > 0 ? r.matched.length / total : 0;
+  return 0.5 * matchRatio + 0.3 * completeness + 0.2 * formatting;
+}
+
+/** Best outcome first (see outcome); ties: more fieldsFound, then fewer errors, then input order. */
 export function rankResults(results: SimulationResult[]): SimulationResult[] {
-  const key = (r: SimulationResult) => r.score ?? r.searchMatch ?? -1;
-  return [...results].sort(
-    (a, b) => key(b) - key(a) || b.fieldsFound - a.fieldsFound || errorCount(a) - errorCount(b),
-  );
+  return results
+    .map((r) => ({ r, key: outcome(r) }))
+    .sort(
+      (a, b) =>
+        b.key - a.key || b.r.fieldsFound - a.r.fieldsFound || errorCount(a.r) - errorCount(b.r),
+    )
+    .map((x) => x.r);
 }
 
 export function buildReport(fileName: string, results: SimulationResult[]): Report {

@@ -46,8 +46,33 @@ describe('ResultCard', () => {
     const result = makeResult(workday, 1); // odd index: no location
     render(<ResultCard result={result} profile={workday} onOpen={() => {}} />);
     expect(screen.getByText('casey@example.com')).toBeInTheDocument();
-    expect(screen.getByText('Not found')).toBeInTheDocument();
+    expect(screen.getByText('Location').nextElementSibling).toHaveTextContent(/^Not found$/);
+    expect(screen.getByText('Links').nextElementSibling).toHaveTextContent(/^Not found$/);
+    expect(screen.getAllByText('Not found')).toHaveLength(2);
     expect(screen.getByText('BSc Computer Science, Example University')).toBeInTheDocument();
+  });
+
+  it('shows the first contact link and how many more there are', () => {
+    const base = makeResult(workday, 0);
+    const result = {
+      ...base,
+      parsed: {
+        ...base.parsed,
+        contact: { ...base.parsed.contact, links: ['linkedin.com/in/casey-example', 'github.com/casey-example'] },
+      },
+    };
+    render(<ResultCard result={result} profile={workday} onOpen={() => {}} />);
+    expect(screen.getByText('Links').nextElementSibling).toHaveTextContent('linkedin.com/in/casey-example (+1 more)');
+  });
+
+  it('has an expandable "Raw text as this ATS sees it" panel with the raw text of this profile', () => {
+    render(<ResultCard result={makeResult(workday, 0)} profile={workday} onOpen={() => {}} />);
+    const card = screen.getByRole('article', { name: 'Workday' });
+    const summary = within(card).getByText('Raw text as this ATS sees it');
+    expect(summary.tagName).toBe('SUMMARY');
+    const details = summary.closest('details')!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector('pre')).toHaveTextContent('Raw text for Workday');
   });
 
   it('caps keyword chips at 8 with "+N more"', () => {

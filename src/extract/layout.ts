@@ -19,9 +19,16 @@ export interface PageLayout {
 
 /** Items whose baselines are within this many points share a line. */
 export const LINE_TOLERANCE = 2;
-/** Top / bottom share of the page treated as header / footer. */
+/** Top / bottom share of the page that may hold a header / footer. */
 export const HEADER_FRACTION = 0.07;
 export const FOOTER_FRACTION = 0.07;
+/** Lines this close to the page edge are always header / footer, gap or not. */
+export const HEADER_ALWAYS_FRACTION = 0.04;
+export const FOOTER_ALWAYS_FRACTION = 0.04;
+/** A band line counts as header / footer only when this far (pt, at least) from the body ... */
+export const MIN_REGION_GAP = 18;
+/** ... and at least this many times the page's median line spacing. */
+export const REGION_GAP_FACTOR = 2;
 
 const MIN_GUTTER = 12; // pt of horizontal space between columns
 const MIN_COLUMN_ROWS = 3;
@@ -39,10 +46,61 @@ const DATE_LIKE = /\b(19|20)\d{2}\b|\b(present|current|now)\b/i;
 const FRAGMENT_ROW_RATIO = 0.5;
 const FRAGMENT_CHAR_SHARE = 0.25;
 
+/**
+ * The band a baseline falls in: the top / bottom 7% of the page. Being in the band is necessary but not
+ * sufficient for a header / footer; see assignRegions.
+ */
 export function regionFor(y: number, pageHeight: number): Region {
   if (y < pageHeight * HEADER_FRACTION) return 'header';
   if (y > pageHeight * (1 - FOOTER_FRACTION)) return 'footer';
   return 'body';
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Region of each row, given the rows' baselines sorted top to bottom. A row in the top band is a header when
+ * it sits above 4% of the page, or when a clear vertical gap (>= 2x the median line spacing, at least 18pt)
+ * separates it from the first row below the band; otherwise it is body (e.g. a name set close to the top
+ * margin and directly followed by the contact line). Footers mirror this from the bottom.
+ */
+export function assignRegions(rowYs: number[], pageHeight: number): Region[] {
+  const n = rowYs.length;
+  const regions: Region[] = rowYs.map(() => 'body');
+  const spacings: number[] = [];
+  for (let i = 1; i < n; i++) spacings.push(rowYs[i] - rowYs[i - 1]);
+  const minGap = Math.max(MIN_REGION_GAP, REGION_GAP_FACTOR * median(spacings));
+  const band = rowYs.map((y) => regionFor(y, pageHeight));
+
+  // Header: walk up from the first row below the top band, tracking the widest gap between it and row i.
+  let firstBelow = band.findIndex((r) => r !== 'header');
+  if (firstBelow < 0) firstBelow = n;
+  let widest = firstBelow === n ? Number.POSITIVE_INFINITY : 0;
+  for (let i = firstBelow - 1; i >= 0; i--) {
+    if (i + 1 < n) widest = Math.max(widest, rowYs[i + 1] - rowYs[i]);
+    if (rowYs[i] < pageHeight * HEADER_ALWAYS_FRACTION || widest >= minGap) regions[i] = 'header';
+  }
+
+  // Footer: walk down from the last row above the bottom band.
+  let lastAbove = -1;
+  for (let i = n - 1; i >= 0; i--) {
+    if (band[i] !== 'footer') {
+      lastAbove = i;
+      break;
+    }
+  }
+  widest = lastAbove < 0 ? Number.POSITIVE_INFINITY : 0;
+  for (let i = lastAbove + 1; i < n; i++) {
+    if (i > 0) widest = Math.max(widest, rowYs[i] - rowYs[i - 1]);
+    if (regions[i] === 'header') continue;
+    if (rowYs[i] > pageHeight * (1 - FOOTER_ALWAYS_FRACTION) || widest >= minGap) regions[i] = 'footer';
+  }
+  return regions;
 }
 
 /** Groups items into rows by baseline (within LINE_TOLERANCE), top to bottom. */
@@ -87,7 +145,16 @@ const crosses = (i: PositionedText, gutter: number): boolean => i.x < gutter && 
  * as a name banner), with substantial, independent text on both sides: the columns run side by side for at
  * least 40% of the body rows, and neither side is just row-aligned fragments such as right-aligned dates.
  */
-export function findGutter(items: PositionedText[], pageWidth: number): number | null {
+export function findGutter(rawItems: PositionedText[], pageWidth: number): number | null {
+  // Clamp to the page so an off-page item cannot blow up the bin array; skip items entirely off-page.
+  const items: PositionedText[] = [];
+  for (const i of rawItems) {
+    if (!Number.isFinite(i.x) || !Number.isFinite(i.width)) continue;
+    if (i.x >= pageWidth || i.x + i.width <= 0) continue;
+    const x = Math.max(0, i.x);
+    const right = Math.min(pageWidth, i.x + Math.max(0, i.width));
+    items.push(x === i.x && right - x === i.width ? i : { ...i, x, width: right - x });
+  }
   if (items.length < MIN_COLUMN_ROWS * 2) return null;
   const minX = Math.floor(Math.min(...items.map((i) => i.x)));
   const maxX = Math.ceil(Math.max(...items.map((i) => i.x + i.width)));
@@ -243,9 +310,15 @@ export function layoutPage(
   page: number,
 ): PageLayout {
   const items = rawItems.filter((i) => i.text.trim() !== '');
-  const header = items.filter((i) => regionFor(i.y, pageHeight) === 'header');
-  const footer = items.filter((i) => regionFor(i.y, pageHeight) === 'footer');
-  const body = items.filter((i) => regionFor(i.y, pageHeight) === 'body');
+  const rows = groupRows(items);
+  const rowRegions = assignRegions(
+    rows.map((r) => r[0].y),
+    pageHeight,
+  );
+  const pick = (region: Region): PositionedText[] => rows.filter((_, i) => rowRegions[i] === region).flat();
+  const header = pick('header');
+  const footer = pick('footer');
+  const body = pick('body');
 
   const gutter = findGutter(body, pageWidth);
   const bodyLines = gutter === null ? toLines(body, page, 'body', 0) : twoColumnLines(body, gutter, page);

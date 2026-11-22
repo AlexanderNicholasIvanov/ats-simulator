@@ -155,7 +155,8 @@ function hasJobTitleWord(text: string): boolean {
     .some((w) => JOB_TITLE_WORDS.has(w));
 }
 
-function hasContactData(line: string): boolean {
+/** True when the text holds an email, a phone number or a profile / web link (the parser's own detectors). */
+export function hasContactData(line: string): boolean {
   return EMAIL_RE.test(line) || PHONE_RES.some((r) => r.test(line)) || new RegExp(LINK_RE.source, 'i').test(line);
 }
 
@@ -241,6 +242,13 @@ function parseContact(topLines: string[], text: string): Contact {
   return contact;
 }
 
+/** Adds every date-looking token in `line` that none of `formats` can read to `unparsed` (no duplicates). */
+function collectUnreadableDates(line: string, formats: DateFormatId[], unparsed: string[]): void {
+  for (const tok of findDateTokens(line)) {
+    if (isUnreadable(tok, formats) && !unparsed.includes(tok)) unparsed.push(tok);
+  }
+}
+
 function parseExperience(
   lines: string[],
   formats: DateFormatId[],
@@ -250,9 +258,7 @@ function parseExperience(
   const used = new Set<number>();
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    for (const tok of findDateTokens(line)) {
-      if (isUnreadable(tok, formats) && !unparsed.includes(tok)) unparsed.push(tok);
-    }
+    collectUnreadableDates(line, formats, unparsed);
     const ranges = findDateRanges(line);
     if (ranges.length === 0) continue;
     const r = ranges[0];
@@ -415,9 +421,16 @@ export function parseResume(text: string, opts: ParseOptions): ParsedResume {
   }
 
   const unparsedDates: string[] = [];
+  const experience = parseExperience(bySection.experience, opts.dateFormats, unparsedDates);
+  // Dates elsewhere (education, projects, certifications, unrecognised sections, ...) are unreadable too.
+  // The top contact block ('none') is skipped: it holds phone numbers and addresses, not dates.
+  for (const kind of Object.keys(bySection) as (SectionKind | 'none')[]) {
+    if (kind === 'none' || kind === 'experience') continue;
+    for (const line of bySection[kind]) collectUnreadableDates(line, opts.dateFormats, unparsedDates);
+  }
   return {
     contact: parseContact(topLines, text),
-    experience: parseExperience(bySection.experience, opts.dateFormats, unparsedDates),
+    experience,
     education: parseEducation(bySection.education),
     skills: parseSkills(bySection.skills),
     sections,

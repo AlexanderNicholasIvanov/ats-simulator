@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PROFILES } from '../../src/ats/index.ts';
 import { LENIENT_HEADINGS, STRICT_HEADINGS } from '../../src/ats/profiles/headings.ts';
 import { ALL_DATE_FORMATS, parseResume } from '../../src/parse/index.ts';
 import { SAMPLE_RESUME_TEXT } from '../../src/sample/index.ts';
@@ -114,6 +115,31 @@ describe('parseResume heuristics', () => {
     expect(r.unparsedDates).toEqual(['Mar 2021']);
     expect(r.experience[0]).toMatchObject({ title: 'Engineer', employer: 'Acme', end: 'present' });
     expect(r.experience[0].start).toBeUndefined();
+  });
+
+  it('reports unreadable dates outside experience too (education, projects, other sections)', () => {
+    const text = [
+      'Pat Example',
+      'Education',
+      'B.S. Computer Science, Summer 2021',
+      'Projects',
+      'Weather dashboard, Jan 2020',
+      'My Journey',
+      'Started coding in Fall 2015.',
+    ].join('\n');
+    const r = parseResume(text, { headings: STRICT_HEADINGS, dateFormats: ['MM/YYYY', 'YYYY'] });
+    expect(r.unparsedDates).toContain('Summer 2021');
+    expect(r.unparsedDates).toContain('Jan 2020');
+    expect(r.unparsedDates).toContain('Fall 2015');
+    expect(parseResume(text, { headings: STRICT_HEADINGS, dateFormats: ALL_DATE_FORMATS }).unparsedDates).toEqual([]);
+  });
+
+  it('finds no unreadable dates in the sample resume for lenient profiles', () => {
+    for (const p of PROFILES.filter((x) => x.dateFormats.length === ALL_DATE_FORMATS.length)) {
+      expect(parseResume(SAMPLE_RESUME_TEXT, { headings: p.headings, dateFormats: p.dateFormats }).unparsedDates).toEqual(
+        [],
+      );
+    }
   });
 
   it('returns an empty result for empty text', () => {
