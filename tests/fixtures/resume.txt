@@ -1,0 +1,23 @@
+Casey Morgan
+casey.morgan@example.com | (555) 010-4477 | Portland, OR
+
+Summary
+Backend software engineer with 7 years of experience building Python and Go services, managing cloud infrastructure on AWS and leading small teams.
+
+Experience
+Senior Software Engineer - Cascade Data Co
+Jan 2021 - Present
+- Led a team of 3 engineers building Python data pipelines on AWS.
+- Cut infrastructure cost by 30% with Terraform and Kubernetes.
+
+Software Engineer - Willamette Logistics
+06/2017 - 12/2020
+- Built Go REST APIs serving 2M requests per day.
+- Introduced CI/CD with GitHub Actions and automated testing.
+
+Education
+B.S. Computer Science
+Riverside State University, 2017
+
+Skills
+Python, Go, AWS, Kubernetes, Terraform, PostgreSQL
