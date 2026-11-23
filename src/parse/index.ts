@@ -375,7 +375,11 @@ export function parseResume(text: string, opts: ParseOptions): ParsedResume {
     for (let j = from; j < lines.length; j++) if (lines[j].trim()) return lines[j].trim();
     return undefined;
   };
-  const indexOfNextNonEmpty = (from: number): number => {
+  const prevNonEmpty = (from: number): string | undefined => {
+    for (let j = from; j >= 0; j--) if (lines[j].trim()) return lines[j].trim();
+    return undefined;
+  };
+  const indexOfNextNonEmpty =(from: number): number => {
     for (let j = from; j < lines.length; j++) if (lines[j].trim()) return j;
     return lines.length;
   };
@@ -386,6 +390,9 @@ export function parseResume(text: string, opts: ParseOptions): ParsedResume {
     if (hasContactData(t) || matchLocation(t, 'us') || matchLocation(t, 'country')) return false;
     if (hasJobTitleWord(t) || INSTITUTION_RE.test(t) || DEGREE_RE.test(t)) return false;
     if (LIST_SECTIONS.includes(current) && !hasHeadingVocab(t) && !/[:：]\s*$/.test(t)) return false;
+    // 'Title  Dates' then 'Employer  Location': the line under a job header belongs to that job
+    const prev = prevNonEmpty(i - 1);
+    if (current === 'experience' && prev && findDateRanges(prev).length > 0 && !hasHeadingVocab(t)) return false;
     const n1 = indexOfNextNonEmpty(i + 1);
     const next = lines[n1]?.trim();
     if (!next) return false; // must be followed by content
