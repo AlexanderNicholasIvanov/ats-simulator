@@ -43,6 +43,14 @@ npm run dev
 
 Then open http://localhost:5173/ats-simulator/.
 
+## Windows app (.exe)
+
+`npm run build:exe` (on Windows) builds `release/ats-simulator.exe`, a single file of about 96 MB that needs nothing else installed. Double-click it and it serves the app on `127.0.0.1` (a random free port, reachable only from your own computer) and opens it in your default browser. Close the console window to stop it.
+
+CI builds the same exe on every push and attaches it to the run as the `ats-simulator-exe` artifact.
+
+The exe is a [Node.js single executable application](https://nodejs.org/api/single-executable-applications.html): the Node runtime plus `scripts/exe/server.cjs` and the files from `dist/`. It is not code-signed, so Windows SmartScreen may show "Windows protected your PC" the first time; choose **More info → Run anyway**. Flags: `--no-open` (don't launch a browser), `--smoke` (serve every bundled file to itself, then exit; used by CI).
+
 ## Scripts
 
 | Script               | What it does                                           |
@@ -50,6 +58,7 @@ Then open http://localhost:5173/ats-simulator/.
 | `npm run dev`        | Start the Vite dev server                              |
 | `npm run build`      | Type-check the app, then build the static site to `dist/` |
 | `npm run preview`    | Serve the production build locally                     |
+| `npm run build:exe`  | Build `release/ats-simulator.exe` (Windows)            |
 | `npm test`           | Run the test suite once (Vitest + jsdom)               |
 | `npm run test:watch` | Run tests in watch mode                                |
 | `npm run lint`       | Lint with ESLint                                       |

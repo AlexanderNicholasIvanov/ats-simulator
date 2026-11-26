@@ -4,3 +4,4 @@ coverage/
 .vite/
 *.log
 .claude/runs/
+release/
